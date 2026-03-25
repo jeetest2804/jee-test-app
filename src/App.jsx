@@ -4,11 +4,11 @@ import { useState, useEffect, useRef } from "react";
    STORAGE  (persists across sessions)
 ───────────────────────────────────────────── */
 async function dbGet(key) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }
+  try { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; }
   catch { return null; }
 }
 async function dbSet(key, val) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+  try { await window.storage.set(key, JSON.stringify(val)); } catch {}
 }
 
 /* ─────────────────────────────────────────────
@@ -207,24 +207,26 @@ function LoginScreen({ onLogin, tests, directTestId }) {
   const linkedTest = directTestId ? tests.find(t => t.id === directTestId) : null;
 
   const handle = async () => {
-    if (!name.trim()) { setErr("Enter your name"); return; }
+    if (!name.trim()) { setErr("Enter your username"); return; }
+    if (!pass.trim()) { setErr("Enter your password"); return; }
     setLoading(true); setErr("");
 
     if (tab === "student") {
       const studentPasswords = await dbGet("student-passwords") || [];
       if (studentPasswords.length === 0) {
-        onLogin(tab, name.trim());
-        return;
-      }
-      const match = studentPasswords.find(
-        sp => sp.name.trim().toLowerCase() === name.trim().toLowerCase()
-      );
-      if (!match) {
-        setErr("Your name is not on the access list. Contact your admin.");
+        setErr("No student accounts exist yet. Ask your admin to create your account.");
         setLoading(false);
         return;
       }
-      if (match.password && match.password !== pass) {
+      const match = studentPasswords.find(
+        sp => sp.username.trim().toLowerCase() === name.trim().toLowerCase()
+      );
+      if (!match) {
+        setErr("Username not found. Contact your admin.");
+        setLoading(false);
+        return;
+      }
+      if (match.password !== pass) {
         setErr("Wrong password. Please try again.");
         setLoading(false);
         return;
@@ -232,7 +234,7 @@ function LoginScreen({ onLogin, tests, directTestId }) {
       onLogin(tab, match.name);
     } else {
       if (pass !== "admin123") {
-        setErr("Wrong password (hint: admin123)");
+        setErr("Wrong password.");
         setLoading(false);
         return;
       }
@@ -282,7 +284,7 @@ function LoginScreen({ onLogin, tests, directTestId }) {
               <input type="password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()}
                 placeholder={tab === "student" ? "Enter your password" : "Enter admin password"}
                 style={{ width:"100%", padding:"12px 14px", borderRadius:10, border:"1px solid rgba(232,201,126,0.25)", background:"rgba(255,255,255,0.05)", color:"white", fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit" }} />
-              {tab !== "student" && <div style={{ color:"rgba(255,255,255,0.25)", fontSize:11, marginTop:5 }}>Demo password: admin123</div>}
+              
             </div>
             {err && <div style={{ background:"rgba(229,57,53,0.15)", border:"1px solid #c62828", borderRadius:8, padding:"9px 13px", color:"#ef9a9a", fontSize:13 }}>{err}</div>}
             <button onClick={handle} disabled={loading}
@@ -308,7 +310,7 @@ function AdminScreen({ user, tests, onSaveTests, onLogout }) {
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   const [studentPasswords, setStudentPasswords] = useState([]);
-  const [newSP, setNewSP] = useState({ name:"", password:"" });
+  const [newSP, setNewSP] = useState({ name:"", username:"", password:"" });
   const [spMsg, setSpMsg] = useState("");
   const paperRef = useRef(); const keyRef = useRef();
 
@@ -325,14 +327,15 @@ function AdminScreen({ user, tests, onSaveTests, onLogout }) {
   };
 
   const addStudent = async () => {
-    if (!newSP.name.trim()) { setSpMsg("Enter student name"); return; }
+    if (!newSP.name.trim()) { setSpMsg("Enter student full name"); return; }
+    if (!newSP.username.trim()) { setSpMsg("Enter a username"); return; }
     if (!newSP.password.trim()) { setSpMsg("Enter a password"); return; }
-    const exists = studentPasswords.find(s => s.name.toLowerCase() === newSP.name.trim().toLowerCase());
-    if (exists) { setSpMsg("Student already exists"); return; }
-    const updated = [...studentPasswords, { name: newSP.name.trim(), password: newSP.password.trim() }];
+    const exists = studentPasswords.find(s => s.username && s.username.toLowerCase() === newSP.username.trim().toLowerCase());
+    if (exists) { setSpMsg("Username already taken"); return; }
+    const updated = [...studentPasswords, { name: newSP.name.trim(), username: newSP.username.trim(), password: newSP.password.trim() }];
     await saveStudentPasswords(updated);
-    setNewSP({ name:"", password:"" });
-    setSpMsg("Student added!");
+    setNewSP({ name:"", username:"", password:"" });
+    setSpMsg("✅ Student added!");
     setTimeout(() => setSpMsg(""), 2000);
   };
 
@@ -512,17 +515,22 @@ function AdminScreen({ user, tests, onSaveTests, onLogout }) {
             <div style={{ background:"white", borderRadius:20, boxShadow:"0 2px 16px rgba(0,0,0,0.08)", padding:32, marginBottom:24 }}>
               <h2 style={{ margin:"0 0 8px", color:"#1a1a2e", fontSize:20 }}>Student Access Control</h2>
               <p style={{ color:"#888", fontSize:13, margin:"0 0 24px" }}>
-                Add students with their passwords. Only listed students can log in.
-                If this list is empty, anyone can log in as a student.
+                Add students with username + password. Only listed students can log in. Students MUST use the exact username and password you set here.
               </p>
 
               <div style={{ background:"#f8f9ff", borderRadius:14, padding:20, border:"1px solid #e8eaf6", marginBottom:24 }}>
-                <div style={{ fontWeight:700, color:"#3949ab", fontSize:14, marginBottom:14 }}>Add Student</div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr auto", gap:12, alignItems:"end" }}>
+                <div style={{ fontWeight:700, color:"#3949ab", fontSize:14, marginBottom:14 }}>➕ Add New Student</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr auto", gap:12, alignItems:"end" }}>
                   <div>
-                    <Label>Student Name</Label>
+                    <Label>Full Name</Label>
                     <input value={newSP.name} onChange={e=>setNewSP(p=>({...p,name:e.target.value}))}
-                      placeholder="e.g. Dushan"
+                      placeholder="e.g. Dushan Mehta"
+                      style={{ width:"100%", padding:"11px 13px", borderRadius:10, border:"1px solid #ddd", fontSize:14, outline:"none", background:"white", boxSizing:"border-box", fontFamily:"inherit" }} />
+                  </div>
+                  <div>
+                    <Label>Username (for login)</Label>
+                    <input value={newSP.username} onChange={e=>setNewSP(p=>({...p,username:e.target.value}))}
+                      placeholder="e.g. dushan"
                       style={{ width:"100%", padding:"11px 13px", borderRadius:10, border:"1px solid #ddd", fontSize:14, outline:"none", background:"white", boxSizing:"border-box", fontFamily:"inherit" }} />
                   </div>
                   <div>
@@ -533,16 +541,16 @@ function AdminScreen({ user, tests, onSaveTests, onLogout }) {
                   </div>
                   <button onClick={addStudent}
                     style={{ padding:"11px 22px", borderRadius:10, border:"none", background:"linear-gradient(135deg,#3949ab,#5c6bc0)", color:"white", fontWeight:800, cursor:"pointer", fontSize:14, fontFamily:"inherit", whiteSpace:"nowrap" }}>
-                    Add Student
+                    Add
                   </button>
                 </div>
-                {spMsg && <div style={{ marginTop:10, color:"#2e7d32", fontSize:13, fontWeight:600 }}>{spMsg}</div>}
+                {spMsg && <div style={{ marginTop:10, color: spMsg.startsWith("✅") ? "#2e7d32" : "#c62828", fontSize:13, fontWeight:600 }}>{spMsg}</div>}
               </div>
 
               {studentPasswords.length === 0 ? (
                 <div style={{ textAlign:"center", padding:"32px 0", color:"#bbb" }}>
                   <div style={{ fontSize:40, marginBottom:10 }}>🚪</div>
-                  <div>No students added yet. Anyone can log in as a student.</div>
+                  <div>No students added yet. Add students above before sharing test links.</div>
                 </div>
               ) : (
                 <div>
@@ -672,6 +680,7 @@ function StudentPasswordRow({ sp, onRemove, onUpdate }) {
       </div>
       <div style={{ flex:1 }}>
         <div style={{ fontWeight:700, color:"#1a1a2e", fontSize:14 }}>{sp.name}</div>
+        <div style={{ fontSize:12, color:"#3949ab", marginTop:1 }}>@{sp.username || sp.name}</div>
         {editing ? (
           <div style={{ display:"flex", gap:8, marginTop:6 }}>
             <input value={newPass} onChange={e=>setNewPass(e.target.value)}
