@@ -4,11 +4,11 @@ import { useState, useEffect, useRef } from "react";
    STORAGE  (persists across sessions)
 ───────────────────────────────────────────── */
 async function dbGet(key) {
-  try { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; }
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }
   catch { return null; }
 }
 async function dbSet(key, val) {
-  try { await window.storage.set(key, JSON.stringify(val)); } catch {}
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
 }
 
 /* ─────────────────────────────────────────────
